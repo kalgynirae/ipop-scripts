@@ -7,50 +7,44 @@
 USERNAME=$1
 PASSWORD=$2
 XMPP_HOST=$3
-CONTAINER_START=$4
-CONTAINER_END=$5
-WAIT_TIME=$6
-MODE=$7
+CONTAINER_START=${4:-0}
+CONTAINER_END=${5:-2}
+WAIT_TIME=${6:-30}
+CONTROLLER_GIT_REPO=${7:-https://github.com/ipop-project/ipop-scripts.git}
+CONTROLLER_GIT_BRANCH=${8:-master}
 HOST=$(hostname)
-IP_PREFIX="172.16.5"
-CONTROLLER=gvpn_controller.py
+CONTROLLER=svpn_controller.py
 START_PATH=container/rootfs/home/ubuntu/start.sh
 
 sudo apt-get update
-sudo apt-get install -y lxc tcpdump
+sudo apt-get install -y lxc tcpdump git
 
 wget -O ubuntu.tgz http://goo.gl/Ze7hYz
 wget -O container.tgz http://goo.gl/XJgdtf
 wget -O svpn.tgz http://goo.gl/Sg4Vh2
+git clone --depth 1 --branch $CONTROLLER_GIT_BRANCH $CONTROLLER_GIT_REPO \
+    controller-git
 
 sudo tar xzf ubuntu.tgz; tar xzf container.tgz; tar xzf svpn.tgz
 sudo cp -a ubuntu/* container/rootfs/
 sudo mv container/home/ubuntu container/rootfs/home/ubuntu/
 mv svpn container/rootfs/home/ubuntu/svpn/
+cp controller-git/src/svpn_controller.py container/rootfs/home/ubuntu/svpn/
 
-STUN="stun.l.google.com:19302"
-TURN=""
-TURN_USER=""
-TURN_PASS=""
-for i in `ls container/rootfs/home/ubuntu/svpn/*.py`
-do
-    sed -i "s/STUN = .*/STUN = \"$STUN\"/g" $i
-    sed -i "s/TURN = .*/TURN = \"$TURN\"/g" $i
-    sed -i "s/TURN_USER = .*/TURN_USER = \"$TURN_USER\"/g" $i
-    sed -i "s/TURN_PASS = .*/TURN_PASS = \"$TURN_PASS\"/g" $i
-done
-
-if [ "x$MODE" = "xsvpn" ]
-then
-    CONTROLLER=svpn_controller.py
-fi
+cat > container/rootfs/home/ubuntu/svpn/config.json <<EOF
+{
+    "stun": ["stun.l.google.com:19302"],
+    "turn": []
+}
+EOF
 
 cat > $START_PATH << EOF
 #!/bin/bash
 SVPN_HOME=/home/ubuntu/svpn
 CONFIG=\`cat \$SVPN_HOME/config\`
 \$SVPN_HOME/svpn-jingle &> \$SVPN_HOME/svpn_log.txt &
-python \$SVPN_HOME/$CONTROLLER \$CONFIG &> \$SVPN_HOME/controller_log.txt &
+python \$SVPN_HOME/$CONTROLLER \$CONFIG -c \$SVPN_HOME/config.json &> \
+    \$SVPN_HOME/controller_log.txt &
 EOF
 
 chmod 755 $START_PATH
@@ -65,14 +59,8 @@ do
 
     sudo cp -a container $container_name
 
-    echo -n "$USERNAME $PASSWORD $XMPP_HOST $IP_PREFIX.$i" > \
-             $container_name/rootfs/home/ubuntu/svpn/config
-
-    if [ "x$MODE" = "xsvpn" ]
-    then
-        echo -n "$USERNAME $PASSWORD $XMPP_HOST" > \
-                 $container_name/rootfs/home/ubuntu/svpn/config
-    fi
+    echo -n "$USERNAME $PASSWORD $XMPP_HOST" > \
+         $container_name/rootfs/home/ubuntu/svpn/config
 
     sudo mv $container_name $lxc_path
     sudo echo "lxc.rootfs = $container_path/rootfs" >> $container_path/config
